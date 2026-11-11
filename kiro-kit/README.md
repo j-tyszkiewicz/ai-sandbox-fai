@@ -52,6 +52,65 @@ A manual **workflow_dispatch** trigger is available as a fallback if needed (Act
   - `management.eu-central-1.kiro.dev:443`
   - `runtime.eu-central-1.kiro.dev:443`
 
+## AWS SSO profiles
+
+The sandbox is network- and filesystem-isolated: it does **not** inherit your
+host `~/.aws/config` or SSO sessions. AWS SSO profiles are delivered into the
+sandbox through the kit, and each user authenticates interactively at runtime.
+
+Config is split so nothing account-specific lands in this **public** repo:
+
+| Part | Shared or personal | Location |
+|------|--------------------|----------|
+| `[sso-session uk-digital-identity]` (start URL, region) | Shared, non-secret | `files/home/kiro-kit/shared/.aws/config` (committed) |
+| `[profile ...]` blocks (account ID, permission set) | Personal | `files/home/kiro-kit/personal/.aws/config` (**gitignored, never committed**) |
+| SSO login token | Per-user | generated at runtime via `aws sso login` |
+
+At startup the kit:
+
+1. Copies the shared `.aws/config` into `~/.aws/` (SSO session only)
+2. Appends a personal `kiro-kit/personal/.aws/config` onto it if present, so
+   your `[profile ...]` blocks sit alongside the shared session
+
+### Adding a profile
+
+Clone this repo (or your fork) and create your profile in the gitignored
+personal folder — `files/home/kiro-kit/personal/.aws/config`. Do **not** repeat
+the `sso-session` block; it comes from the shared config.
+
+```ini
+[profile my-profile]
+sso_session = uk-digital-identity
+sso_account_id = 123456789012
+sso_role_name = YourPermissionSetName
+region = eu-west-2
+output = json
+```
+
+The whole `personal/` tree is gitignored, so your account ID and permission set
+stay out of version control.
+
+Run the kit from the local folder:
+
+```bash
+sbx run di-kiro ~/workspace/your-project \
+  --kit /path/to/ai-sandbox/kiro-kit
+```
+
+Then inside the sandbox, authenticate once per token lifetime:
+
+```bash
+aws sso login --profile my-profile
+aws sts get-caller-identity --profile my-profile   # verify
+```
+
+`/home/agent` persists across sandbox stop/restart, so the cached SSO token
+survives restarts — you only re-login when it expires.
+
+> Teammates with the same permission set on the account can reuse the same
+> profile definition — their own `aws sso login` supplies their identity, so no
+> per-user editing is needed.
+
 ## Kiro Config
 
 The kit supports shared organisation config and personal overrides, both delivered to `~/.kiro/` (global Kiro config) in the sandbox.

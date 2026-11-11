@@ -25,6 +25,21 @@ environment:
 commands:
   install:
     - command: pip install uv --break-system-packages
+    # The base image ships an older Node (v22). The One Login repos require
+    # Node >=24. Install Node 24 from NodeSource (runs as root at build time),
+    # replacing the base-image Node.
+    - command: >-
+        curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+        && apt-get install -y nodejs
+    # AWS CLI v2 is not in apt and the base image doesn't ship it. Install the
+    # official bundle (arch-aware: aarch64 or x86_64) so `aws sso login` works.
+    - command: >-
+        apt-get install -y unzip &&
+        ARCH="$(uname -m)" &&
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o /tmp/awscliv2.zip &&
+        unzip -q /tmp/awscliv2.zip -d /tmp &&
+        /tmp/aws/install &&
+        rm -rf /tmp/awscliv2.zip /tmp/aws
     - command: >-
         echo 'kiro-cli settings telemetry.enabled false'
         >> /etc/sandbox-persistent.sh
@@ -32,6 +47,12 @@ commands:
     - command: ["/bin/sh", "-c", "cp -r /home/agent/kiro-kit/shared/.kiro/. /home/agent/.kiro/"]
       user: "1000"
       description: "Copy shared Kiro config to ~/.kiro"
+    # Deliver the shared AWS config (SSO session only — no account-specific
+    # profiles; those live in the gitignored personal/.aws/config). Users then
+    # run `aws sso login --profile <name>` inside the sandbox.
+    - command: ["/bin/sh", "-c", "mkdir -p /home/agent/.aws && cp -r /home/agent/kiro-kit/shared/.aws/. /home/agent/.aws/"]
+      user: "1000"
+      description: "Copy shared AWS SSO session config to ~/.aws"
     # The kiro image sets NPM_CONFIG_PREFIX to a dir whose lib/ is missing;
     # create it so npx can unpack the Agent Manager CLI (the agent owns the
     # dir, so no root needed).
@@ -41,6 +62,13 @@ commands:
     - command: ["/bin/sh", "-c", "if [ -d /home/agent/kiro-kit/personal/.kiro ]; then cp -r /home/agent/kiro-kit/personal/.kiro/. /home/agent/.kiro/; fi"]
       user: "1000"
       description: "Overlay personal Kiro config on top of shared"
+    # Overlay personal AWS profiles (account-specific; the gitignored
+    # personal/.aws/config, never committed here). The personal config file is
+    # APPENDED to the shared ~/.aws/config so the shared [sso-session] block is
+    # preserved alongside the user's [profile ...] blocks.
+    - command: ["/bin/sh", "-c", "if [ -f /home/agent/kiro-kit/personal/.aws/config ]; then mkdir -p /home/agent/.aws && printf '\\n' >> /home/agent/.aws/config && cat /home/agent/kiro-kit/personal/.aws/config >> /home/agent/.aws/config; fi"]
+      user: "1000"
+      description: "Overlay personal AWS profiles on top of shared SSO session"
 
 caps:
   network:
@@ -48,6 +76,14 @@ caps:
       - "cognito-identity.eu-central-1.amazonaws.com:443"
       - "oidc.eu-west-2.amazonaws.com:443"
       - "uk-digital-identity.awsapps.com:443"
+      # AWS IAM Identity Center (SSO) profile login + credential retrieval.
+      # oidc.eu-west-2 and uk-digital-identity.awsapps.com (above) cover the
+      # device-flow authorization; these cover fetching role credentials and
+      # calling STS when assuming the SSO role.
+      - "portal.sso.eu-west-2.amazonaws.com:443"
+      - "sts.eu-west-2.amazonaws.com:443"
+      # AWS CLI v2 installer download (install-time).
+      - "awscli.amazonaws.com:443"
       - "management.eu-central-1.kiro.dev:443"
       - "runtime.eu-central-1.kiro.dev:443"
       - "**.docs.aws.amazon.com:443"
@@ -57,6 +93,8 @@ caps:
       - "docs.docker.com:443"
       - "kiro.dev:443"
       - "registry.npmjs.org:443"
+      # NodeSource: install Node 24 (apt packages served from deb.nodesource.com)
+      - "deb.nodesource.com:443"
       # Agent skills: Agent Manager downloads the discovery document
       # (archive + Contents API) and clones skill source repositories.
       # See files/home/kiro-kit/shared/ai-skills.yml.

@@ -5,6 +5,23 @@ All notable changes to the One Login Kits will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2026-11-11
+
+### Added
+
+- AWS SSO profile support in the sandbox:
+  - Shared `~/.aws/config` delivered from
+    `files/home/kiro-kit/shared/.aws/config`, containing the generic
+    `[sso-session uk-digital-identity]` block only (no account-specific data)
+  - Startup command copies the shared AWS config into `~/.aws`
+  - Startup command appends a personal AWS config (if present) from
+    `kiro-kit/personal/.aws/config` on top of the shared SSO session, so
+    account-specific `[profile ...]` blocks stay out of this public repo
+  - `portal.sso.eu-west-2.amazonaws.com` and `sts.eu-west-2.amazonaws.com`
+    added to the network allow list (SSO credential retrieval + STS)
+- README section documenting how to add SSO profiles via the gitignored
+  personal config folder
+
 ## [0.2.0] - 2026-11-04
 
 ### Added
